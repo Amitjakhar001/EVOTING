@@ -2,8 +2,6 @@
 
 export const ADMIN_EMAILS = [
   "ankitjakharabc@gmail.com",
-  "souradyuti@iitbhilai.ac.in",
-  "jbprogrammersguild@gmail.com",
   "amitjakhar@iitbhilai.ac.in"
 ] as const;
 
