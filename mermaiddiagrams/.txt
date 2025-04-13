@@ -1,0 +1,359 @@
+/////////////// Contract.Frontend flow //////////////////////
+
+flowchart TD
+    classDef regNode fill:#e1f5fe,stroke:#01579b,color:#01579b
+    classDef subNode fill:#e8f5e9,stroke:#2e7d32,color:#2e7d32
+    classDef voteNode fill:#fff3e0,stroke:#e65100,color:#e65100
+    classDef resNode fill:#f3e5f5,stroke:#6a1b9a,color:#6a1b9a
+    classDef phaseTitle fill:#37474f,color:white,stroke:#263238
+
+    subgraph Registration["Registration Phase"]
+        R1[Frontend] -->|email, voterPublicKey, signature| R2[Contract]
+        R2 -->|Store| R3[voterData mapping]
+        R2 -->|Store| R4[voterEAPublicKeys mapping]
+        R2 -->|Store| R5[registeredEmails mapping]
+        R2 -->|Emit| R6[KeysGenerated event]
+    end
+
+    subgraph Submission["Submission Phase"]
+        S1[Frontend] -->|votingPublicKey, ringSignature, keyImage, voterAddress| S2[Contract]
+        S2 -->|Store| S3[votingKeySubmissions array]
+        S2 -->|Store| S4[usedKeyImages mapping]
+        S2 -->|Emit| S5[VotingKeySubmitted event]
+    end
+
+    subgraph Voting["Voting Phase"]
+        V1[Frontend] -->|candidateName, votingPublicKey, signature| V2[Contract]
+        V2 -->|Mark as used| V3[votingKeySubmission]
+        V2 -->|Increment| V4[candidates vote count]
+        V2 -->|Emit| V5[VoteCast event]
+    end
+
+    subgraph Results["Results Phase"]
+        RS1[Frontend] -->|getVoteCounts| RS2[Contract]
+        RS2 -->|Return| RS3[candidates array]
+    end
+
+    Registration --> Submission
+    Submission --> Voting
+    Voting --> Results
+    
+    class R1,R2,R3,R4,R5,R6 regNode
+    class S1,S2,S3,S4,S5 subNode
+    class V1,V2,V3,V4,V5 voteNode
+    class RS1,RS2,RS3 resNode
+    class Registration,Submission,Voting,Results phaseTitle
+
+    //////////////////////////////////////////////////////
+
+    ///////////// Submission Phase ///////////////////////
+    flowchart TD
+    Start([User initiates key submission]) --> CheckTime{Check submission\ntime remaining}
+    
+    CheckTime -->|Time expired| ShowExpired[Display 'Submission Closed' alert]
+    CheckTime -->|< 20 seconds left| ShowDisabled[Display 'Submission Disabled' alert]
+    CheckTime -->|< 60 seconds left| ShowWarning[Display 'Limited Time' warning]
+    CheckTime -->|Sufficient time| Continue
+    
+    Continue --> InputKey[User enters private key]
+    InputKey --> ValidateKey{Validate key}
+    
+    ValidateKey -->|Empty key| ErrorEmpty[Show error: Enter key]
+    ValidateKey -->|Key too short| ErrorShort[Show error: Invalid key length]
+    ValidateKey -->|Valid key| StartSubmission[Start submission process]
+    
+    StartSubmission --> Step1[Step 1: Generate new voting key pair]
+    Step1 -->|Success| Step2[Step 2: Fetch public keys from contract]
+    Step1 -->|Failure| KeyGenError[Show error: Key generation failed]
+    
+    Step2 -->|Success| Step3[Step 3: Create ring signature]
+    Step2 -->|Failure| ContractError[Show error: Failed to retrieve public keys]
+    Step2 -->|No keys found| NoKeysError[Show error: No public keys found]
+    
+    Step3 --> GetCaseId[Fetch case ID from contract]
+    GetCaseId -->|Success| CreateSignature[Send signature creation request]
+    GetCaseId -->|Failure| CaseIdError[Show error: Failed to get case ID]
+    
+    CreateSignature -->|Success| CheckKeyImage[Check if key image already used]
+    CreateSignature -->|Network error| NetworkError[Show error: Network error]
+    CreateSignature -->|Invalid key| InvalidKeyError[Show error: Invalid private key]
+    CreateSignature -->|Other errors| SignatureError[Show error: Signature creation failed]
+    
+    CheckKeyImage -->|Not used| Step4[Step 4: Verify ring signature]
+    CheckKeyImage -->|Already used| KeyImageError[Show error: Key already used]
+    CheckKeyImage -->|Check failed| KeyImageCheckError[Show error: Failed to verify key image]
+    
+    Step4 --> VerifySignature[Send verification request]
+    VerifySignature -->|Valid signature| Step5[Step 5: Submit to blockchain]
+    VerifySignature -->|Invalid signature| InvalidSignatureError[Show error: Invalid signature]
+    VerifySignature -->|Network error| VerifyNetworkError[Show error: Network error]
+    
+    Step5 --> SubmitBlockchain[Submit transaction to blockchain API]
+    SubmitBlockchain -->|Success| Step6[Step 6: Prepare key pair download]
+    SubmitBlockchain -->|Failure| ParseBlockchainError{Parse blockchain error}
+    
+    ParseBlockchainError -->|Insufficient Funds| InsufficientError[Show error: Insufficient funds]
+    ParseBlockchainError -->|Key Image Used| KeyImageUsedError[Show error: Key already used]
+    ParseBlockchainError -->|Rejected Transaction| RejectedError[Show error: Transaction rejected]
+    ParseBlockchainError -->|Timeout| TimeoutError[Show error: Transaction timed out]
+    ParseBlockchainError -->|Nonce Error| NonceError[Show error: Nonce error]
+    ParseBlockchainError -->|Gas/Fee Issues| GasError[Show error: Gas/fee issues]
+    ParseBlockchainError -->|Registration Ended| RegistrationEndedError[Show error: Registration period ended]
+    ParseBlockchainError -->|Other errors| GenericBlockchainError[Show error: Blockchain error]
+    
+    Step6 --> PrepareDownload[Create downloadable file with keys]
+    PrepareDownload -->|Success| TriggerDownload[Trigger file download]
+    PrepareDownload -->|Failure| DownloadError[Show success with warning]
+    
+    TriggerDownload --> ShowSuccess[Show success message]
+    DownloadError --> ShowPartialSuccess[Show success with manual key copy instructions]
+    
+    ShowExpired --> End([End])
+    ShowDisabled --> End
+    ErrorEmpty --> End
+    ErrorShort --> End
+    KeyGenError --> End
+    ContractError --> End
+    NoKeysError --> End
+    CaseIdError --> End
+    NetworkError --> End
+    InvalidKeyError --> End
+    SignatureError --> End
+    KeyImageError --> End
+    KeyImageCheckError --> End
+    InvalidSignatureError --> End
+    VerifyNetworkError --> End
+    InsufficientError --> End
+    KeyImageUsedError --> End
+    RejectedError --> End
+    TimeoutError --> End
+    NonceError --> End
+    GasError --> End
+    RegistrationEndedError --> End
+    GenericBlockchainError --> End
+    ShowSuccess --> End
+    ShowPartialSuccess --> End
+
+    ////////////////////////////////////////////////
+
+    /////////////////Registration phase ///////////////
+
+    flowchart TD
+    %% Main Registration Flow
+    A[User Enters Email] --> B{Validate Email Domain}
+    B -->|Invalid| C[Show Error: Invalid Domain]
+    B -->|Valid| D{Check if Email Already Registered}
+    
+    D -->|Already Registered| E[Show Error: Email Already Used]
+    D -->|Not Registered| F{Check Contract Balance}
+    
+    F -->|Insufficient| G[Show Error: Insufficient Balance]
+    F -->|Sufficient| H[Generate Keys via API]
+    
+    H -->|Success| I[Request EA Signature]
+    H -->|Failure| J[Show Error: Key Generation Failed]
+
+    subgraph "Signature Creation Process"
+        I --> SA[Create Message Hash]
+        SA -->|"ethers.solidityPackedKeccak256"| SB[Message Hash]
+        SB --> SC[Sign with EA Private Key]
+        SC -->|"wallet.signMessage()"| SD[Generate Signature]
+        SD --> SE[Local Verification]
+    end
+    
+    subgraph "Signature Verification"
+        SE --> VA[Reconstruct Message Hash]
+        VA -->|"keccak256"| VB[Create Prefixed Hash]
+        VB -->|"keccak256 with prefix"| VC[Recover Signer]
+        VC -->|"ecrecover"| VD{Compare Address}
+        VD -->|"Matches"| VE[Signature Valid]
+        VD -->|"Doesn't Match"| VF[Signature Invalid]
+    end
+    
+    VE --> K[Create Certificate]
+    VF --> J
+    
+    K --> L[Register on Blockchain]
+    
+    L -->|Success| M[Prepare Email Package]
+    L -->|Failure| N[Show Error: Blockchain Registration Failed]
+    
+    M --> O{Send Email}
+    
+    O -->|Success| P[Show Success Message]
+    O -->|Failure| Q[Show Warning & Download Option]
+    
+    subgraph "Email Package Contents"
+        M --> R[Public Key]
+        M --> S[Private Key]
+        M --> T[Certificate]
+        M --> U[Key Coordinate]
+        M --> V[Digest]
+    end
+
+    subgraph "Certificate Contents"
+        K --> W[User Public Key]
+        K --> X[EA Public Key]
+        K --> Y[EA Signature]
+    end
+
+    style VE fill:#90EE90
+    style VF fill:#FFB6C1
+
+    ///////////////////////////////////////////
+
+    ////////////// Ring Signature ///////////////
+    flowchart TD
+    %% Overview section
+    subgraph Overview ["Overview: LSAG Ring Signature"]
+        subgraph PaperAlg ["LSAG Paper Algorithm"]
+            P1["Step 1: Compute h=H2(L), KeyImage=h^x"] --> P2["Step 2: Pick random u, compute first challenge c"]
+            P2 --> P3["Step 3: For non-signers - compute s values and challenges"]
+            P3 --> P4["Step 4: For signer - compute s = u - x*c mod q"]
+        end
+        
+        subgraph CodeImpl ["Code Implementation"]
+            C1["createKeyImage() function"] --> C2["createRingSignature() function"]
+            C2 --> C3["Generate s values in loop"]
+            C3 --> C4["Complete ring with signer value"]
+        end
+        
+        subgraph VerifyProc ["Verification Process"]
+            V1["Input: pubKeys, message, keyImage, signatures"] --> V2["Recompute all challenges"]
+            V2 --> V3{"Final challenge = checksum?"}
+            V3 -->|Yes| V4["Signature Valid"]
+            V3 -->|No| V5["Signature Invalid"]
+        end
+        
+        PaperAlg --> CodeImpl
+        CodeImpl --> VerifyProc
+    end
+    
+    %% Connection between diagrams
+    OverviewConnection[" "]
+    Overview --> OverviewConnection
+    OverviewConnection --> Detailed
+    
+    %% Detailed diagram
+    subgraph Detailed ["Detailed Implementation"]
+        subgraph KeyGen ["Key Generation"]
+            KG1["Generate privateKey (x)"] --> KG2["Calculate publicKey (y = g^x)"]
+        end
+        
+        subgraph KeyImage ["Key Image Creation"]
+            KI1["Input: privateKey, pubKeys, caseId"] --> KI2["h = hashToPoint(pubKeysDigest + caseId)"]
+            KI2 --> KI3["keyImage = h^privateKey"]
+        end
+        
+        subgraph Sign ["Signature Creation"]
+            S1["Input: privateKey, pubKeys, keyImage, message, signerIndex"] 
+            S1 --> S2["Generate random u"]
+            S2 --> S3["Calculate initial commitment (g^u, h^u)"]
+            S3 --> S4["Get initial challenge c from hash"]
+            S4 --> S5["Loop through ring members"]
+            S5 --> S6{"Current index == signerIndex?"}
+            S6 -->|No| S7["Generate random s_i"]
+            S7 --> S8["Calculate z1 = g^s_i * y_i^c_i"]
+            S8 --> S9["Calculate z2 = h^s_i * keyImage^c_i"]
+            S9 --> S10["Get next challenge c from hash"]
+            S10 --> S5
+            S6 -->|Yes| S11["Calculate s_signer = u - privateKey * c mod q"]
+            S11 --> S12["Complete the ring"]
+            S12 --> S13["Return signatures array and checksum"]
+        end
+        
+        subgraph Verify ["Signature Verification"]
+            VD1["Input: pubKeys, message, keyImage, signatures, checksum"] 
+            VD1 --> VD2["Initialize challenge from checksum"]
+            VD2 --> VD3["Loop through all positions"]
+            VD3 --> VD4["Calculate z1 = g^s_i * y_i^c_i"]
+            VD4 --> VD5["Calculate z2 = h^s_i * keyImage^c_i"]
+            VD5 --> VD6["Get next challenge from hash"]
+            VD6 --> VD3
+            VD3 -->|Complete| VD7{"Final challenge == checksum?"}
+            VD7 -->|Yes| VD8["Signature Valid"]
+            VD7 -->|No| VD9["Signature Invalid"]
+        end
+        
+        KG2 --> KI1
+        KI3 --> S1
+        S13 --> VD1
+    end
+    
+    %% Styling for the sections
+    style PaperAlg fill:#f9f,stroke:#333
+    style CodeImpl fill:#9f9,stroke:#333
+    style VerifyProc fill:#99f,stroke:#333
+    
+    style KeyGen fill:#f9f,stroke:#333
+    style KeyImage fill:#f9f,stroke:#333
+    style Sign fill:#9f9,stroke:#333
+    style Verify fill:#99f,stroke:#333
+    
+    style Overview fill:#fff,stroke:#999
+    style Detailed fill:#fff,stroke:#999
+    style OverviewConnection fill:none,stroke:none
+
+    /////////////////////////////////////////////
+
+    ////////////// Voting Phase /////////////////
+    sequenceDiagram
+    participant User
+    participant Frontend as Frontend (VotingPhase Component)
+    participant API as API Endpoint
+    participant Contract as Blockchain Contract
+    
+    Note over User,Contract: Voting Phase Flow
+    
+    User->>Frontend: Visit voting page
+    
+    Frontend->>Contract: Fetch candidates
+    Contract-->>Frontend: Return candidate list
+    
+    Frontend->>Contract: Check voting time remaining
+    Contract-->>Frontend: Return time until voting ends
+    
+    alt Less than 20 seconds remaining
+        Frontend-->>User: Display warning & disable voting
+    end
+    
+    User->>Frontend: 1. Select candidate
+    User->>Frontend: 2. Input voting private key
+    
+    User->>Frontend: Click "Cast Vote"
+    
+    Frontend->>Frontend: Parse private key input
+    Note right of Frontend: Handles both JSON format<br/>and raw private key
+    
+    Frontend->>Contract: Check admin balance
+    Contract-->>Frontend: Return balance status
+    
+    alt Insufficient admin balance
+        Frontend-->>User: Display error message
+    else Sufficient balance
+        Frontend->>Frontend: Compute public key from private key
+        Frontend->>Contract: Check if voting key already used
+        Contract-->>Frontend: Return key usage status
+        
+        alt Key already used
+            Frontend-->>User: Display "key already used" error
+        else Key not yet used
+            Frontend->>Frontend: Sign message (candidate + voting public key)
+            Frontend->>API: POST /api/blockchain
+            Note right of API: Send candidate, voting<br/>public key & signature
+            
+            API->>Contract: Call castVote function
+            Contract->>Contract: Verify signature
+            Contract->>Contract: Record vote
+            Contract-->>API: Return transaction result
+            
+            API-->>Frontend: Return API response
+            
+            alt Successful vote
+                Frontend-->>User: Display success message
+            else Error occurred
+                Frontend-->>User: Display appropriate error message
+            end
+        end
+    end
+    ///////////////////////////////////////////////
